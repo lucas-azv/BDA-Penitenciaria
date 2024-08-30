@@ -70,7 +70,105 @@ descricao TEXT NOT NULL,
 FOREIGN KEY (id_detento) REFERENCES detento(id)
 );
 
--- ===================================================================================================
+-- ============================== ex 01 - Procedures ==============================
+
+-- Procedimento para Inserir ou Atualizar informações de detentos (Lucas)
+DELIMITER //
+
+CREATE PROCEDURE inserir_ou_atualizar_detento(
+    IN p_nome VARCHAR(100),
+    IN p_data_nascimento DATE,
+    IN p_altura INT,
+    IN p_peso FLOAT,
+    IN p_sexo ENUM('M', 'F'),
+    IN p_historico_delitos VARCHAR(1027),
+    IN p_data_ingresso DATE,
+    IN p_data_saida DATE,
+    IN p_motivo_saida VARCHAR(255),
+    IN p_id_cela INT,
+    IN p_id INT
+)
+BEGIN
+    IF p_nome IS NULL OR p_nome = '' THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Nome do detento é obrigatório.';
+    END IF;
+
+    IF p_data_nascimento IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Data de nascimento do detento é obrigatória.';
+    END IF;
+
+    IF p_data_ingresso IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Data de ingresso do detento é obrigatória.';
+    END IF;
+
+    IF p_id_cela IS NULL THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'ID da cela é obrigatório.';
+    END IF;
+
+    IF p_id IS NULL THEN
+        INSERT INTO detento (nome, data_nascimento, altura, peso, sexo, historico_delitos, data_ingresso, data_saida, motivo_saida, id_cela)
+        VALUES (p_nome, p_data_nascimento, p_altura, p_peso, p_sexo, p_historico_delitos, p_data_ingresso, p_data_saida, p_motivo_saida, p_id_cela);
+    ELSE
+        UPDATE detento 
+        SET nome = p_nome, data_nascimento = p_data_nascimento, altura = p_altura, peso = p_peso, sexo = p_sexo, historico_delitos = p_historico_delitos, 
+            data_ingresso = p_data_ingresso, data_saida = p_data_saida, motivo_saida = p_motivo_saida, id_cela = p_id_cela
+        WHERE id = p_id;
+    END IF;
+END //
+
+DELIMITER ;
+
+-- procedimento para gerar relatório com informações sobre celas por pavilhão (Lucas)
+DELIMITER //
+
+CREATE PROCEDURE relatorio_celas_por_pavilhao(
+    IN p_id_pavilhao INT
+)
+BEGIN
+    SELECT 
+        p.nome AS nome_pavilhao,
+        c.tipo AS tipo_cela,
+        COUNT(c.id) AS total_celas,
+        SUM(c.capacidade) AS capacidade_total
+    FROM 
+        pavilhao p
+    INNER JOIN 
+        cela c ON p.id = c.id_pavilhao
+    WHERE 
+        p.id = p_id_pavilhao
+    GROUP BY 
+        p.nome, c.tipo;
+END //
+
+DELIMITER ;
+
+-- procedimento para gerar relatório com informações de visitas por cada detento (Lucas)
+DELIMITER //
+
+CREATE PROCEDURE relatorio_visitas_por_detento(
+    IN p_id_detento INT
+)
+BEGIN
+    SELECT 
+        d.nome AS nome_detento,
+        v.data_visita AS data_visita,
+        v.hora_entrada AS hora_entrada,
+        v.hora_saida AS hora_saida,
+        vi.nome AS nome_visitante,
+        vi.parentesco AS parentesco
+    FROM 
+        visita v
+    INNER JOIN 
+        detento d ON v.id_detento = d.id
+    INNER JOIN 
+        visitante vi ON v.id_visitante = vi.id
+    WHERE 
+        d.id = p_id_detento
+    ORDER BY 
+        v.data_visita DESC;
+END //
+
+DELIMITER ;
 
 -- Procedimento para Inserir ou Atualizar Pavilhão (Vinicius)
 DELIMITER //
@@ -155,6 +253,28 @@ END //
 
 DELIMITER ;
 
+-- ============================== ex 02 - Functions ==============================
+
+-- Função para calcular o tempo de permanência do detento (Lucas)
+DELIMITER //
+
+CREATE FUNCTION calcular_tempo_permanencia(data_ingresso DATE, data_saida DATE)
+RETURNS INT
+DETERMINISTIC
+BEGIN
+    DECLARE tempo_permanencia INT;
+
+    IF data_saida IS NULL THEN
+        SET tempo_permanencia = TIMESTAMPDIFF(DAY, data_ingresso, CURDATE());
+    ELSE
+        SET tempo_permanencia = TIMESTAMPDIFF(DAY, data_ingresso, data_saida);
+    END IF;
+
+    RETURN tempo_permanencia;
+END //
+
+DELIMITER ;
+
 -- Função para Calcular a Idade do Detento (Vinicius)
 DELIMITER //
 
@@ -180,6 +300,37 @@ BEGIN
 END //
 
 DELIMITER ; 
+
+-- ============================== ex 03 - Triggers ==============================
+
+-- Trigger para backup de dados de detendo antes de exclusão (Lucas)
+DELIMITER //
+
+CREATE TRIGGER before_detento_delete
+BEFORE DELETE ON detento
+FOR EACH ROW
+BEGIN
+    INSERT INTO detento_backup (id, nome, data_nascimento, altura, peso, sexo, historico_delitos, data_ingresso, data_saida, motivo_saida, id_cela)
+    VALUES (OLD.id, OLD.nome, OLD.data_nascimento, OLD.altura, OLD.peso, OLD.sexo, OLD.historico_delitos, OLD.data_ingresso, OLD.data_saida, OLD.motivo_saida, OLD.id_cela);
+END //
+
+DELIMITER ;
+
+-- Trigger para atualizar data de saída do detento quando for inserido o motivo de saída (Lucas)
+DELIMITER //
+
+CREATE TRIGGER after_detento_update
+AFTER UPDATE ON detento
+FOR EACH ROW
+BEGIN
+    IF NEW.motivo_saida IS NOT NULL AND OLD.motivo_saida IS NULL THEN
+        UPDATE detento
+        SET data_saida = CURDATE()
+        WHERE id = NEW.id;
+    END IF;
+END //
+
+DELIMITER ;
 
 -- Trigger para Atualizar a Data de Saída do Detento ao Mudar a Cela (Vinicius)
 DELIMITER //
